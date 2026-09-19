@@ -116,8 +116,19 @@ PROJECT_URL = "https://github.com/BCMOJANG/RandomNamePicker"
 ISSUES_URL = PROJECT_URL + "/issues"
 
 
+def app_dir():
+    """程序所在目录：名单和配置都放这里。
+
+    打包成 exe 后 __file__ 指向 PyInstaller 的临时解包目录（_MEIxxxx），
+    必须改用 exe 自身所在目录，否则名单/配置每次启动都是空的、退出就丢。
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 # ------------------------------ 配置文件（config.json） ------------------------------
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+CONFIG_PATH = os.path.join(app_dir(), "config.json")
 
 
 def load_config():
@@ -164,7 +175,11 @@ def apply_ui_scale_setting(value=None):
 
 # ------------------------------ 自启动相关函数 (Windows) ------------------------------
 def get_startup_command():
-    """获取自启动命令字符串（使用 pythonw.exe 静默运行）"""
+    """获取自启动命令字符串"""
+    # 打包成 exe 后直接注册 exe 自己（无控制台窗口，不需要 pythonw）
+    if getattr(sys, "frozen", False):
+        return f'"{os.path.abspath(sys.executable)}"'
+    # 源码运行时用 pythonw.exe 静默启动
     # 获取 Python 解释器路径，优先使用 pythonw.exe
     if sys.executable.endswith('pythonw.exe'):
         python_path = sys.executable
@@ -780,7 +795,7 @@ class FloatingWindow(QWidget):
         self.shuffled_names = []
         self.current_index = 0
         self.names = []
-        self.names_path = os.path.join(os.path.dirname(__file__), "names.txt")
+        self.names_path = os.path.join(app_dir(), "names.txt")
         self.pool_dirty = False
         self.names_stamp = None
         self.load_names()
@@ -1053,6 +1068,14 @@ class FloatingWindow(QWidget):
 
 # ------------------------------ 程序入口 ------------------------------
 if __name__ == "__main__":
+    # 打包成无控制台的 exe 后 sys.stdout / sys.stderr 是 None，print 会报错
+    if getattr(sys, "frozen", False) and (sys.stdout is None or sys.stderr is None):
+        try:
+            _null = open(os.devnull, "w", encoding="utf-8")
+            sys.stdout = sys.stdout or _null
+            sys.stderr = sys.stderr or _null
+        except OSError:
+            pass
     # 高 DPI 属性必须在创建 QApplication 之前设置，否则 Qt 直接忽略
     configure_high_dpi()
     app = QApplication(sys.argv)

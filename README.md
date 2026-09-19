@@ -88,6 +88,33 @@ python name_picker.py
 - **高 DPI**：`AA_EnableHighDpiScaling` **必须在创建 `QApplication` 之前**设置，创建之后再设 Qt 只会打印一条 warning 然后忽略
 - **置顶**：Windows 的"置顶"只在窗口创建时生效一次，之后需要定期 `SetWindowPos(hwnd, HWND_TOPMOST, ...)` 压回顶层；调用前必须给 ctypes 声明 `argtypes`，否则 64 位下句柄会被当成 32 位 int 传
 - **名单监听**：1.5 秒轮询一次 `os.stat` 指纹（约 0.012 ms），指纹没变就完全不读文件
+- **打包兼容**：`app_dir()` 在冻结环境（PyInstaller）下返回 **exe 所在目录** —— 打包后 `__file__` 指向临时解包目录 `_MEIxxxx`，直接用它的话名单和配置每次启动都是空的、退出就丢。名单路径、配置路径、开机自启动命令都基于 `app_dir()`
+
+## 打包成 exe
+
+仓库自带 PyInstaller 配置（`name_picker.spec`），只打包用到的 QtCore / QtGui / QtWidgets：
+
+```bash
+pip install pyinstaller
+python -m PyInstaller name_picker.spec --noconfirm
+# 产物：dist/随机点名.exe（约 18.5 MB，单文件、无控制台窗口）
+```
+
+体积控制手段：先排掉 Qml / Quick / WebEngine / Designer / Network / Sql 等全部用不到的 Qt 模块，
+再剔掉动态 GL（`libEGL` / `libGLESv2`）、软件渲染（`opengl32sw.dll`，单个就有 20 MB）、
+d3d 编译器（`d3dcompiler_47.dll`）；插件只留 `platforms/qwindows.dll` 和 Windows 原生样式，
+翻译文件与 qml 目录一并丢掉，编译时 `optimize=2` 去掉 docstring / assert。
+原始 PyQt5 目录 142 MB，打包后单文件 18.5 MB。
+
+两个调试开关（环境变量）：
+
+| 变量 | 作用 |
+|---|---|
+| `NP_BUILD_CONSOLE=1` | 构建带控制台的调试版（能看到 traceback），产物名带 `_debug` |
+| `NP_BUILD_ONEDIR=1` | 构建成文件夹模式：启动时不用解包，启动更快，但不是一个文件 |
+
+注意：打包后 `names.txt` 和 `config.json` 生成在 **exe 所在目录**，所以别把 exe 放在没有写权限的目录
+（例如 `C:\Program Files`）。开机自启动注册的也是 exe 自身，不再依赖 Python 环境。
 
 ## 已知限制
 
