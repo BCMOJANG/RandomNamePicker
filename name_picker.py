@@ -483,9 +483,14 @@ class NameDialog(QDialog):
     def __init__(self, name, parent=None):
         super().__init__(parent)
         self.setWindowTitle("随机点名结果")
+        # 无边框 + 自绘标题栏：原生标题栏里塞不进自己的按钮，
+        # 只有这样「?」才能贴着关闭按钮的左边显示。
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        self._drag_offset = None
         self.default_font_size = S(100)
         self.min_font_size = S(30)
         self.margin = S(40)
+        self.bar_height = S(38)       # 自绘标题栏高度（不参与文字尺寸）
         # 短名字会让点名框窄得突兀：框宽至少按这么多个汉字计算
         # （4 个字 ≈ 615px @100pt；改成 3 约 478px，5 约 749px）
         self.min_text_chars = 4
@@ -501,7 +506,6 @@ class NameDialog(QDialog):
         self.init_ui(name)
         self.adjust_to_content(name)
         self.apply_theme()
-        self.place_help_button()
         
         # 强制定时器
         self.topmost_timer = QTimer(self)
@@ -509,27 +513,70 @@ class NameDialog(QDialog):
         self.topmost_timer.start(500)  # 每500毫秒刷新一次置顶
 
     def init_ui(self, name):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(S(20), S(20), S(20), S(20))
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        self.name_label = QLabel(name)
-        self.name_label.setAlignment(Qt.AlignCenter)
-        self.name_label.setWordWrap(True)  # 允许换行
-        layout.addWidget(self.name_label)
+        # ---------------- 自绘标题栏：标题 + 问号 + 关闭（问号在关闭左边）----------------
+        self.bar_layout = QHBoxLayout()
+        self.bar_layout.setContentsMargins(S(12), S(8), S(8), 0)
+        self.bar_layout.setSpacing(S(6))
 
-        self.confirm_btn = QPushButton("确定")
-        self.confirm_btn.setFixedSize(S(100), S(40))
-        self.confirm_btn.clicked.connect(self.close)
-        layout.addWidget(self.confirm_btn, alignment=Qt.AlignCenter)
+        self.title_label = QLabel("随机点名结果")
+        self.title_label.setObjectName("titleLabel")
+        self.bar_layout.addWidget(self.title_label)
+        self.bar_layout.addStretch()
 
-        # 右上角问号：点击打开项目主页（不参与布局，靠绝对定位钉在角落）
-        self.help_btn = QPushButton("?", self)
+        self.help_btn = QPushButton("?")
         self.help_btn.setObjectName("helpButton")
-        self.help_btn.setFixedSize(S(32), S(32))
+        self.help_btn.setFixedSize(S(26), S(26))
         self.help_btn.setCursor(Qt.PointingHandCursor)
         self.help_btn.setToolTip("%s v%s · 关于本项目 / 使用说明\n%s"
                                  % (APP_NAME, APP_VERSION, PROJECT_URL))
         self.help_btn.clicked.connect(self.open_project_page)
+        self.bar_layout.addWidget(self.help_btn)
+
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setObjectName("closeButton")
+        self.close_btn.setFixedSize(S(26), S(26))
+        self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.setToolTip("关闭")
+        self.close_btn.clicked.connect(self.close)
+        self.bar_layout.addWidget(self.close_btn)
+
+        outer.addLayout(self.bar_layout)
+
+        # ---------------- 内容区 ----------------
+        self.content_layout = QVBoxLayout()
+        self.content_layout.setContentsMargins(S(20), S(10), S(20), S(20))
+        self.content_layout.setSpacing(S(10))
+
+        self.name_label = QLabel(name)
+        self.name_label.setAlignment(Qt.AlignCenter)
+        self.name_label.setWordWrap(True)  # 允许换行
+        self.content_layout.addWidget(self.name_label)
+
+        self.confirm_btn = QPushButton("确定")
+        self.confirm_btn.setFixedSize(S(100), S(40))
+        self.confirm_btn.clicked.connect(self.close)
+        self.content_layout.addWidget(self.confirm_btn, alignment=Qt.AlignCenter)
+
+        outer.addLayout(self.content_layout)
+
+    def mousePressEvent(self, event):
+        """无边框窗口：按住空白处即可拖动。"""
+        if event.button() == Qt.LeftButton:
+            self._drag_offset = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_offset is not None and (event.buttons() & Qt.LeftButton):
+            self.move(event.globalPos() - self._drag_offset)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_offset = None
+        event.accept()
 
     def apply_theme(self):
         is_light = get_windows_theme()
@@ -560,13 +607,16 @@ class NameDialog(QDialog):
         self.setStyleSheet(base + self.help_button_style(is_light))
 
     def help_button_style(self, is_light):
-        """问号按钮单独一套样式：QPushButton 通用规则会把它涂成方块按钮。"""
+        """自绘标题栏的样式：QPushButton 通用规则会把问号/关闭涂成方块按钮。"""
         if is_light:
             border, color, hover_bg, hover_color = "#c8c8c8", "#8a8a8a", "#ececec", "#222222"
+            title_color = "#666666"
         else:
             border, color, hover_bg, hover_color = "#5a5a5a", "#9a9a9a", "#3d3d3d", "#ffffff"
+            title_color = "#aaaaaa"
         return """
-            QPushButton#helpButton {
+            QLabel#titleLabel { color: %s; font-size: %dpt; }
+            QPushButton#helpButton, QPushButton#closeButton {
                 background-color: transparent;
                 border: 1px solid %s;
                 border-radius: %dpx;
@@ -576,27 +626,12 @@ class NameDialog(QDialog):
                 padding: 0px;
             }
             QPushButton#helpButton:hover { background-color: %s; color: %s; }
-        """ % (border, S(16), color, S(13), hover_bg, hover_color)
+            QPushButton#closeButton:hover { background-color: #e81123; color: #ffffff; }
+        """ % (title_color, S(11), border, S(13), color, S(13), hover_bg, hover_color)
 
     def open_project_page(self):
         """点击问号：用默认浏览器打开项目主页。"""
         open_url(PROJECT_URL)
-
-    def place_help_button(self):
-        """把问号钉在结果窗右上角。
-
-        名字占满整行，问号不参与布局，所以用绝对定位，并在每次尺寸变化时重钉一次。
-        """
-        btn = getattr(self, "help_btn", None)
-        if btn is None:
-            return
-        inset = S(8)
-        btn.move(max(inset, self.width() - btn.width() - inset), inset)
-        btn.raise_()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.place_help_button()
 
     def calculate_text_size(self, text, font_size):
         """计算文本在指定字体大小下的尺寸。
@@ -653,7 +688,7 @@ class NameDialog(QDialog):
         
         # 加上边距和按钮高度
         ideal_width = text_width + self.margin * 2
-        ideal_height = text_height + self.margin * 2 + 60  # 60是按钮高度+间距
+        ideal_height = text_height + self.margin * 2 + 60 + self.bar_height  # 60是按钮高度+间距
         
         # 检查是否超过屏幕限制
         if ideal_width <= self.max_width and ideal_height <= self.max_height:
@@ -666,7 +701,7 @@ class NameDialog(QDialog):
             while self.current_font_size > self.min_font_size:
                 text_width, text_height = self.calculate_text_size(text, self.current_font_size)
                 window_width = text_width + self.margin * 2
-                window_height = text_height + self.margin * 2 + 60
+                window_height = text_height + self.margin * 2 + 60 + self.bar_height
                 
                 if window_width <= self.max_width and window_height <= self.max_height:
                     self.resize(window_width, window_height)
@@ -697,16 +732,18 @@ class NameDialog(QDialog):
         self.default_font_size = S(100)
         self.min_font_size = S(30)
         self.margin = S(40)
+        self.bar_height = S(38)
         self.current_font_size = self.default_font_size
         self.fixed_text_size = None
         self.pool_widest = None
         self.confirm_btn.setFixedSize(S(100), S(40))
-        self.help_btn.setFixedSize(S(32), S(32))
-        self.apply_theme()               # 问号按钮的圆角/字号也要跟着倍率走
-        self.place_help_button()
-        layout = self.layout()
-        if layout is not None:
-            layout.setContentsMargins(S(20), S(20), S(20), S(20))
+        self.help_btn.setFixedSize(S(26), S(26))
+        self.close_btn.setFixedSize(S(26), S(26))
+        self.bar_layout.setContentsMargins(S(12), S(8), S(8), 0)
+        self.bar_layout.setSpacing(S(6))
+        self.content_layout.setContentsMargins(S(20), S(10), S(20), S(20))
+        self.content_layout.setSpacing(S(10))
+        self.apply_theme()               # 问号/关闭的圆角与字号也要跟着倍率走
 
     def showEvent(self, event):
         """窗口显示时强制置顶"""
