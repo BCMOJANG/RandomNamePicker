@@ -108,6 +108,14 @@ def S(value):
     return int(round(value * UI_SCALE))
 
 
+# ------------------------------ 项目信息 ------------------------------
+APP_NAME = "随机点名"
+APP_VERSION = "1.0"
+AUTHOR = "BCMOJANG"
+PROJECT_URL = "https://github.com/BCMOJANG/RandomNamePicker"
+ISSUES_URL = PROJECT_URL + "/issues"
+
+
 # ------------------------------ 配置文件（config.json） ------------------------------
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
@@ -277,6 +285,19 @@ def open_file_with_default_app(file_path):
         subprocess.call(["xdg-open", file_path])
 
 
+def open_url(url):
+    """用默认浏览器打开链接；返回是否成功。
+
+    Windows 下 os.startfile 对 http(s) 链接同样有效（交给系统默认浏览器）。
+    """
+    try:
+        open_file_with_default_app(url)
+        return True
+    except Exception as e:
+        print("打开链接失败: %s" % e)
+        return False
+
+
 def get_windows_theme():
     """检测 Windows 系统主题，返回 True 为浅色，False 为深色"""
     try:
@@ -297,7 +318,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.names_path = names_path
         self.setWindowTitle("随机点名 - 设置")
-        self.resize(S(420), S(320))
+        self.resize(S(420), S(430))
         self.init_ui()
         self.apply_theme()
 
@@ -346,6 +367,23 @@ class SettingsDialog(QDialog):
         self.auto_start_checkbox = QCheckBox("开机自启动")
         self.auto_start_checkbox.stateChanged.connect(self.on_auto_start_changed)
         layout.addWidget(self.auto_start_checkbox, alignment=Qt.AlignCenter)
+
+        # 关于
+        layout.addSpacing(S(6))
+        self.about_label = QLabel()
+        self.about_label.setText(
+            '<div style="line-height:150%%; text-align:center;">'
+            '%s v%s　作者 %s<br>'
+            '<a href="%s" style="color:#1a73e8;">%s</a><br>'
+            '<a href="%s" style="color:#1a73e8;">使用说明 / 反馈问题</a>'
+            '</div>' % (APP_NAME, APP_VERSION, AUTHOR, PROJECT_URL, PROJECT_URL, ISSUES_URL)
+        )
+        self.about_label.setAlignment(Qt.AlignCenter)
+        self.about_label.setWordWrap(True)
+        self.about_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        self.about_label.setOpenExternalLinks(True)   # 点击链接交给系统浏览器
+        self.about_label.setToolTip("点击链接用浏览器打开项目主页")
+        layout.addWidget(self.about_label)
 
         # 按钮区域
         btn_layout = QHBoxLayout()
@@ -416,7 +454,7 @@ class SettingsDialog(QDialog):
 
     def reapply_ui_scale(self):
         """缩放改变后，本窗口自身也重排一次。"""
-        self.resize(S(420), S(320))
+        self.resize(S(420), S(430))
         layout = self.layout()
         if layout is not None:
             layout.setContentsMargins(S(20), S(20), S(20), S(20))
@@ -463,6 +501,7 @@ class NameDialog(QDialog):
         self.init_ui(name)
         self.adjust_to_content(name)
         self.apply_theme()
+        self.place_help_button()
         
         # 强制定时器
         self.topmost_timer = QTimer(self)
@@ -483,10 +522,19 @@ class NameDialog(QDialog):
         self.confirm_btn.clicked.connect(self.close)
         layout.addWidget(self.confirm_btn, alignment=Qt.AlignCenter)
 
+        # 右上角问号：点击打开项目主页（不参与布局，靠绝对定位钉在角落）
+        self.help_btn = QPushButton("?", self)
+        self.help_btn.setObjectName("helpButton")
+        self.help_btn.setFixedSize(S(32), S(32))
+        self.help_btn.setCursor(Qt.PointingHandCursor)
+        self.help_btn.setToolTip("%s v%s · 关于本项目 / 使用说明\n%s"
+                                 % (APP_NAME, APP_VERSION, PROJECT_URL))
+        self.help_btn.clicked.connect(self.open_project_page)
+
     def apply_theme(self):
         is_light = get_windows_theme()
         if is_light:
-            self.setStyleSheet("""
+            base = """
                 QDialog { background-color: white; }
                 QLabel { color: black; }
                 QPushButton {
@@ -495,9 +543,9 @@ class NameDialog(QDialog):
                     border-radius: 4px;
                 }
                 QPushButton:hover { background-color: #d0d0d0; }
-            """)
+            """
         else:
-            self.setStyleSheet("""
+            base = """
                 QDialog { background-color: #2b2b2b; }
                 QLabel { color: white; }
                 QPushButton {
@@ -507,7 +555,48 @@ class NameDialog(QDialog):
                     border-radius: 4px;
                 }
                 QPushButton:hover { background-color: #505050; }
-            """)
+            """
+        # 样式表不能写成 self.styleSheet() + 追加：apply_theme 会被多次调用，那样会越叠越长
+        self.setStyleSheet(base + self.help_button_style(is_light))
+
+    def help_button_style(self, is_light):
+        """问号按钮单独一套样式：QPushButton 通用规则会把它涂成方块按钮。"""
+        if is_light:
+            border, color, hover_bg, hover_color = "#c8c8c8", "#8a8a8a", "#ececec", "#222222"
+        else:
+            border, color, hover_bg, hover_color = "#5a5a5a", "#9a9a9a", "#3d3d3d", "#ffffff"
+        return """
+            QPushButton#helpButton {
+                background-color: transparent;
+                border: 1px solid %s;
+                border-radius: %dpx;
+                color: %s;
+                font-size: %dpt;
+                font-weight: normal;
+                padding: 0px;
+            }
+            QPushButton#helpButton:hover { background-color: %s; color: %s; }
+        """ % (border, S(16), color, S(13), hover_bg, hover_color)
+
+    def open_project_page(self):
+        """点击问号：用默认浏览器打开项目主页。"""
+        open_url(PROJECT_URL)
+
+    def place_help_button(self):
+        """把问号钉在结果窗右上角。
+
+        名字占满整行，问号不参与布局，所以用绝对定位，并在每次尺寸变化时重钉一次。
+        """
+        btn = getattr(self, "help_btn", None)
+        if btn is None:
+            return
+        inset = S(8)
+        btn.move(max(inset, self.width() - btn.width() - inset), inset)
+        btn.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.place_help_button()
 
     def calculate_text_size(self, text, font_size):
         """计算文本在指定字体大小下的尺寸。
@@ -612,6 +701,9 @@ class NameDialog(QDialog):
         self.fixed_text_size = None
         self.pool_widest = None
         self.confirm_btn.setFixedSize(S(100), S(40))
+        self.help_btn.setFixedSize(S(32), S(32))
+        self.apply_theme()               # 问号按钮的圆角/字号也要跟着倍率走
+        self.place_help_button()
         layout = self.layout()
         if layout is not None:
             layout.setContentsMargins(S(20), S(20), S(20), S(20))
